@@ -46,7 +46,7 @@ Comparisons count headline fingerprints, shared/new groups and increased occurre
 
 Snapshot parser versions are recorded. Cross-version comparisons return `unsupported` and require reanalysis of both original inputs. Legacy snapshots remain readable for basic summary/evidence, but new triage/filters require reanalysis; there is no silent migration that rewrites old evidence. Comparisons include bounded titled examples with evidence-ready IDs to avoid paging every group.
 
-`scripts/diagnose.py` is a small real stdio MCP client: analyze -> triage -> optionally retrieve up to three examples privately. It prints compact summaries and keeps detailed JSON under the operator's store. With exactly two inputs it records a first-input-baseline/second-input-candidate comparison. It launches only the local Python MCP service, never the game. Evidence collection by event frequency is not causal prioritization.
+`scripts/diagnose.py` is a small real stdio MCP client: analyze -> triage -> optionally retrieve up to three examples privately. It prints compact summaries and keeps detailed JSON under the operator's store. With exactly two inputs it records a first-input-baseline/second-input-candidate comparison. It launches only the local Python MCP service, never the game. Evidence collection uses impact-selected occurrence handles, not frequency. Impact rules inspect every retained occurrence; bounded structural-data leads remain visible separately from frequency-based symptom families. Optional caller-reported blockers are labeled external, never independently verified. Rankings do not establish cause or functional correctness.
 
 Isolation proposals recursively remove metadata-declared hard dependents while retaining original relative order. Missing/duplicate active identities refuse a proposal. Core/DLC cannot be removal candidates or closure casualties. Conditional, optional, version-specific and undeclared dependencies remain unsupported. Output is a bounded sample; it is not a ready-to-run Mod configuration.
 
@@ -60,3 +60,7 @@ Proposals do not prove minimality, causality or safety. A future experiment runn
 4. Narrow patch proposals based on permitted evidence, independent functional assertions and rollback artifacts. No blanket exception swallowing, Def deletion or automatic config edits.
 
 The current version implements none of the automatic execution/patching items above. Separate 1.6/1.7 runtime validation will be needed when execution adapters are introduced; text parsing alone is not runtime compatibility proof.
+
+## Optional local guards
+
+The MCP remains read-only: it does not execute or install patches. `patches/LocalIntegratedVanillaGuards` is separately built, reviewed and deployed, pinned to one vanilla assembly hash. It guards two narrow vanilla consumers without altering third-party definitions. The appearance guard must install from the Mod constructor before Def/icon resolution; a late startup static constructor misses that phase. The reading guard installs later and delegates to the user's existing named guard. Installation failures are explicit per module, with owner-scoped target cleanup. Compilation, offline Harmony tests and synthetic real-engine checks are separate evidence levels, not a full environment acceptance.

@@ -28,7 +28,7 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("Never read third-party", init.instructions)
                     tools = (await session.list_tools()).tools
                     names = {t.name for t in tools}
-                    self.assertEqual(len(names), 10)
+                    self.assertEqual(len(names), 11)
                     self.assertFalse(any("source" in x or "decomp" in x or "grant" in x for x in names))
                     caps = value(await session.call_tool("rimdiag_capabilities", {}))
                     self.assertFalse(caps["implementation_access"])
@@ -38,6 +38,10 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(report["recognized_error_events"], 30)
                     triage = value(await session.call_tool("rimdiag_triage", {"run_id": report["run_id"]}))
                     self.assertEqual(triage['symptom_families'][0]['events'], 30)
+                    priority = value(await session.call_tool('rimdiag_prioritize', {'run_id': report['run_id']}))
+                    self.assertEqual(priority['occurrences_inspected'], 30)
+                    self.assertFalse(priority['causal_chain_established'])
+                    self.assertEqual(triage['investigation_priorities'], priority['investigation_priorities'])
                     filtered = value(await session.call_tool("rimdiag_list_errors", {'run_id': report['run_id'], 'category_filter': 'null_reference'}))
                     self.assertEqual(len(filtered['groups']), 1)
                     page = value(await session.call_tool("rimdiag_list_errors", {"run_id": report["run_id"]}))

@@ -13,9 +13,9 @@
 
 [English](README.en.md) · [架构与权限](docs/ARCHITECTURE.md) · [验证与限制](docs/VALIDATION.md)
 
-状态：**0.2.0 源码开发预览**。目前交付日志诊断闭环，不宣称自动找到全部冲突或自动生成兼容补丁。可用于 1.6 / 1.7 的文本日志与身份元数据，不需要加载游戏 Mod 或编译游戏程序集；两版本游戏内行为尚未验证。
+状态：**0.3.0 源码开发预览**。目前交付日志诊断闭环，不宣称自动找到全部冲突或自动生成兼容补丁。可用于 1.6 / 1.7 的文本日志与身份元数据，不需要加载游戏 Mod 或编译游戏程序集；日志诊断不等于功能通过；本轮仅额外验证了限定的 1.7 材质保护，1.6 未实测。
 
-本轮已通过真实 MCP 分析 615 个配置包的大型环境日志，修复完整日期前缀、异常链拆分和诊断工具注释误计数，新增症状族摘要、分类筛选与精确包查询。**候选数减少来自解析修正，不代表游戏错误被修复。** 见 [本轮验证](docs/ITERATION_02.md)。
+此前已通过真实 MCP 分析 615 个配置包的大型环境日志，修复完整日期前缀、异常链拆分和诊断工具注释误计数，新增症状族摘要、分类筛选与精确包查询。**候选数减少来自解析修正，不代表游戏错误被修复。** 见 [本轮验证](docs/ITERATION_02.md)。
 
 ## 最快开始：交给你的 Agent
 
@@ -24,6 +24,20 @@
 > 请阅读 https://github.com/OPFIMISS/RimDiag，安装并配置 RimDiag MCP。我的 Player.log 是：`填写路径`；ModsConfig.xml 是：`填写路径`；Mod 库目录是：`填写路径`。使用 RimDiag 分析错误，先看摘要和分组，仅按需读证据。只能默认查询游戏本体源码；严禁未经我逐项明确授权读取第三方 Mod 源码、Defs/Patches 实现或反编译 DLL，也不能借其他工具绕过。区分身份引用、候选原因和已验证原因，不从命名空间猜 Mod 名称，不修改玩家配置或自动禁用 DLC。报告证据、未知项和下一步实验。
 
 项目地址不会自动安装 MCP；需要 Python 3.10+、本机工具权限和配置好的 MCP 客户端。不绑定特定模型或厂商。没有 MCP 的客户端也可先使用 CLI 摘要。
+
+## 本轮改进：优先处理阻断，而非只看次数
+
+`rimdiag_prioritize` 检查所有保留的事件实例：一次阅读策略初始化异常、空 `thingClass`、生成重试耗尽，也可能比数百条资源警告严重。返回精确 group_id、occurrence、行号和排序依据；这仍是调查顺序，不是已验证归责或 TPS 评测。默认 triage 第一页也附带前三项优先线索和结构性坏数据。
+
+如果用户已观察到进不了地图，可提供有界、带来源的影响报告：
+
+```json
+{"run_id":"实际快照ID","report":{"symptom":"家具错误阻止进入地图；加局部保护后可进入","blocked_stage":"map_creation","related_group_ids":["实际错误组ID"],"outcome_after_workaround":"用户确认可进入地图"}}
+```
+
+该报告仅作用于本次调用，明确标为用户提供、尚未独立核实；不会将“绕过阻断”视为原始 Def 已修好。旧日志与当前日志要分开分析：保护生效后，原来的异常可能不再出现，但坏数据仍需展示。参考 [本轮验证与本体保护](docs/ITERATION_03.md)。
+
+可选的[局部保护源码](patches/LocalIntegratedVanillaGuards/README.md)独立于 MCP，只适用于已校验的 **1.7.4990 rev1069** 本体构建。不会由 MCP 自动安装，也不承诺修好第三方家具、Pawn 约束或 Harmony 补丁；1.6 未构建、未验证。
 
 ## 不可绕过的使用规则
 
@@ -86,7 +100,7 @@ CLI 一次分析：
 
 1. `rimdiag_capabilities`：确认当前能力与限制。
 2. `rimdiag_analyze(log_index=0)`：流式导入主机指定日志，返回 run_id、错误数量、分组数和完整性状态。
-3. `rimdiag_triage(run_id, count=5)`：先看分类计数与症状族；相同缺失类型、相同 XML 字段不匹配等可聚合显示，原始精确组全部保留。症状相同不等于根因相同。
+3. 先调用 `rimdiag_prioritize(run_id)` 按流程阻断和结构性坏数据安排调查，再调用 `rimdiag_triage(run_id, count=5)`：先看分类计数与症状族；相同缺失类型、相同 XML 字段不匹配等可聚合显示，原始精确组全部保留。症状相同不等于根因相同。
 4. `rimdiag_list_errors(run_id, count=10)`：按首次出现顺序查看精确组，使用 next_offset 分页。可传 `category_filter`、`family_id` 和 `sort="frequency"`，避免逐页翻阅。首次出现或高频不等于根因优先级。
 5. `rimdiag_read_evidence(run_id, group_id, occurrence=0)`：仅对需要调查的组读取一次有界证据，检查行号、截断标志、identity_references 和 unverified_symbols。同一组不同 occurrence 可以来自不同原因。内层异常保留在同一事件；`exception_types` 是有界类型列表。`reported_attributions` 是原日志中排错工具的猜测，明确未核实，不能升级为身份依据或责任结论。
 6. `rimdiag_inventory`：按需核实配置中的包名、显示名、元数据歧义与依赖；传 `package_id="实际日志中的完整包ID"` 可直接查身份、支持版本和依赖启用状态，无需遍历 600 项。它不是实际加载顺序证明。
@@ -95,7 +109,7 @@ CLI 一次分析：
 
 每次扫描是独立快照。轮询摘要不重新读原日志；不把整份日志塞进上下文。不要重复扫描同一文件来代替读取已有结果。
 
-目前共 10 个工具。`rimdiag_review_repair_plan` 只审查故障链、证据锚点和验证声明，不执行补丁、不读取第三方实现、不批准发布。无需手动配置第三方 MCP 客户端，也可通过仓库脚本执行真实 MCP 一轮诊断（先安装项目）：
+目前共 11 个工具。`rimdiag_review_repair_plan` 只审查故障链、证据锚点和验证声明，不执行补丁、不读取第三方实现、不批准发布。无需手动配置第三方 MCP 客户端，也可通过仓库脚本执行真实 MCP 一轮诊断（先安装项目）：
 
 ```powershell
 & ./.venv/Scripts/python.exe scripts/diagnose.py --store ./runs/diagnosis --log 'D:/Logs/Player.log'

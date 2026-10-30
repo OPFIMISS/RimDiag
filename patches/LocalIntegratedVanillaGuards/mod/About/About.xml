@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>本地整合保护：阅读策略与缺失图形（测试版）</name>
+  <packageId>local.integratedvanillaguards</packageId>
+  <supportedVersions><li>1.7</li></supportedVersions>
+  <modDependencies><li><packageId>brrainz.harmony</packageId><displayName>Harmony</displayName></li></modDependencies>
+  <loadAfter><li>brrainz.harmony</li><li>local.readingpolicynullguard</li></loadAfter>
+  <description>仅在验证过的本机 1.7.4990 本体构建安装局部保护。阅读策略跳过 null thingClass，并报告坏定义；默认子图缺失时用原版坏贴图材质占位。已安装的独立阅读策略保护会被识别并沿用。不恢复家具、资产或第三方补丁，不吞全局异常。测试版，进入地图不代表全部功能正常。</description>
+</ModMetaData>

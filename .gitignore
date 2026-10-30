@@ -11,3 +11,8 @@ build/
 *.dll
 *.exe
 *.pdb
+**/bin/
+**/obj/
+**/Assemblies/*
+*.deps.json
+*.runtimeconfig.json

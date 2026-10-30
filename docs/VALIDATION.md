@@ -65,3 +65,5 @@ No new game launch, player configuration modification, third-party source/Defs/P
 6. Keep the original severity token available when identifying events; removing `[Error]` before detection would miss unknown error messages.
 7. The local default package mirror could not resolve build dependencies; the public index successfully installed the tested versions. README documents this recovery.
 8. Git SSH authentication permits pushing but cannot itself create repositories. Creation requires GitHub API authentication; do not print credentials or place publication credentials in the project.
+
+Current 0.3.0 impact-priority checks and the separately scoped vanilla-guard compilation/live-engine evidence are recorded in [iteration three](ITERATION_03.md). No whole-environment gameplay acceptance is implied.

@@ -256,7 +256,7 @@ class Diagnostics:
                 "section_marker_count": meta.get("section_count", 0),
                 "multiple_sections": meta.get("section_count", 0) > 1,
                 "diagnosis": "candidates_only_no_causality", "actual_loaded_order_verified": False,
-                "next": "triage -> filtered list_errors -> selected evidence; namespaces and reporter hints are not verified identities"}
+                "next": "prioritize -> triage -> filtered list_errors -> selected evidence; namespaces and reporter hints are not verified identities"}
 
     def identity(self, text: str, inventory: dict) -> list[dict]:
         text = identity_text(text)
@@ -327,7 +327,11 @@ class Diagnostics:
                 samples = db.execute("SELECT fingerprint,headline,category FROM groups WHERE family_id=? ORDER BY first_line,fingerprint LIMIT 2", (family["family_id"],)).fetchall()
                 output.append(dict(family) | {"examples": [{"group_id": r["fingerprint"], "headline": r["headline"][:220]} for r in samples],
                     "categories": sorted({r["category"] for r in samples}), "causality": "unconfirmed"})
+            from .impact import prioritize
+            impact = prioritize(self, run_id, count=3) if offset == 0 else {}
             return {"run_id": run_id, "category_counts": categories, "symptom_families": output,
+                    "investigation_priorities": impact.get("investigation_priorities", []),
+                    "structural_data_leads": impact.get("structural_data_leads", []),
                     "input_sections": meta.get("section_markers", []),
                     "input_sections_truncated": meta.get("section_count", 0) > 8,
                     "input_warning": "sectioned report: may combine historical sessions and upstream-truncated excerpts; prefer the current native log" if meta.get("section_count", 0) else None,

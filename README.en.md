@@ -13,7 +13,7 @@
 
 [中文说明](README.md) · [Architecture and permissions](docs/ARCHITECTURE.md) · [Validation](docs/VALIDATION.md)
 
-**0.2.0 source developer preview.** This is a log-diagnosis foundation, not automatic conflict certification or patch generation. It accepts 1.6/1.7 text logs and identity metadata without loading a game mod or compiling game assemblies. Neither version has live-game acceptance for this project.
+**0.3.0 source developer preview.** This is a log-diagnosis foundation, not automatic conflict certification or patch generation. It accepts 1.6/1.7 text logs and identity metadata without loading a game mod or compiling game assemblies. No full-environment functional acceptance is claimed. A limited 1.7 material-guard engine check is documented below; 1.6 has no live check.
 
 This iteration exercised real MCP against logs from a 615-package configuration. It fixes full-date prefixes, split exception chains and reporter annotations counted as errors, and adds symptom triage, filters and exact package lookup. **Lower counts reflect parser corrections, not repaired game errors.** See [iteration evidence](docs/ITERATION_02.md).
 
@@ -84,7 +84,7 @@ CLI without MCP:
 1. `rimdiag_capabilities`: permissions, budgets and supported scope.
 2. `rimdiag_analyze(log_index=0)`: stream a host-configured log into a new snapshot; receive compact counts and run_id.
 3. `rimdiag_summary(run_id)`: query stored progress-free counts without rereading the input.
-4. `rimdiag_triage(run_id, count=5)`: compact category counts and symptom families, retaining all exact groups. Same missing type/invalid field can share a family; this is not a common-cause finding.
+4. Call `rimdiag_prioritize(run_id)` for impact clues, then `rimdiag_triage(run_id, count=5)`: compact category counts and symptom families, retaining all exact groups. Same missing type/invalid field can share a family; this is not a common-cause finding.
 5. `rimdiag_list_errors(run_id, offset=0, count=10)`: page exact groups, optionally using `category_filter`, `family_id` and `sort="frequency"`. First appearance and frequency are not causal priority.
 6. `rimdiag_read_evidence(run_id, group_id, occurrence=0)`: selected bounded occurrence, line numbers, truncation, identity references and unverified symbols. Inner exceptions stay in the same event, with bounded `exception_types`. Third-party `reported_attributions` remain unverified hints and cannot establish identity or responsibility.
 7. `rimdiag_inventory`: page configured packages or supply an exact `package_id` from evidence to directly check identity, supported versions and declared dependency activation. This is not actual-loaded-order verification.
@@ -100,7 +100,7 @@ For a one-pass diagnosis through real MCP without manually configuring a separat
 & ./.venv/Scripts/python.exe scripts/diagnose.py --store ./runs/diagnosis --log 'D:/Logs/Player.log'
 ```
 
-This prints compact counts/categories/top-three symptoms and saves a private JSON report. The same metadata options are supported. `--evidence 2` saves two family examples privately, without printing full evidence. With exactly two `--log` inputs, the first is baseline and the second candidate; comparison is saved. Only the local MCP service starts, never the game.
+This prints compact priorities, structural leads, counts/categories/top-three symptoms and saves a private JSON report. The same metadata options are supported. `--evidence 2` saves two impact-selected occurrences privately, without printing full evidence. With exactly two `--log` inputs, the first is baseline and the second candidate; comparison is saved. Only the local MCP service starts, never the game.
 
 ## Identity, grouping and limits
 
@@ -125,3 +125,11 @@ Next: validate more log formats, integrate recorded loading phases/actual order,
 Recommended companions: [RimProbe](https://github.com/OPFIMISS/RimProbe) for real-game tests, [RimSage](https://github.com/realloon/RimSage) for **vanilla game** implementation queries and [rimworld-modding-skill](https://github.com/Kon-on/rimworld-modding-skill) for development guidance. The same authorization rule applies to external tools.
 
 See [validation](docs/VALIDATION.md). No project license was selected; no game or third-party binaries are bundled.
+
+## Impact-first investigation (0.3.0)
+
+Use `rimdiag_prioritize(run_id)` before frequency summaries. It scans every retained occurrence and returns exact group IDs, occurrence selectors, lines and impact signals. Mandatory initialization failures, invalid runtime classes and exhausted generation retries may matter even once. The first triage page also includes three investigation priorities and bounded structural-data leads. Rankings are heuristics, not causal attribution or measured performance.
+
+An optional typed `report` accepts `symptom`, `blocked_stage`, `related_group_ids` and `outcome_after_workaround`. References must exist in the snapshot. User-observed blockers receive priority with explicit caller-supplied provenance; reports apply to that call only, and workaround success never means upstream data was repaired. Analyze historical and current sessions separately.
+
+The optional [local vanilla guards](patches/LocalIntegratedVanillaGuards/README.md) are separate from the MCP. They target only the fingerprinted 1.7.4990 rev1069 build, preserve the existing local reading guard, and provide a visible missing-default-material fallback. No third-party implementation was inspected. No 1.6 guard compilation or gameplay validation is claimed. See [iteration three](docs/ITERATION_03.md) for evidence and limits.

@@ -32,12 +32,15 @@ async def diagnose(args):
                 summary = payload(await session.call_tool("rimdiag_analyze", {"log_index": index}))
                 triage = payload(await session.call_tool("rimdiag_triage", {"run_id": summary["run_id"], "count": 3}))
                 snapshot = {"log_index": index, "summary": summary, "triage": triage, "selected_evidence": []}
-                for family in triage["symptom_families"][:args.evidence]:
-                    group = family["examples"][0]["group_id"]
-                    snapshot["selected_evidence"].append(payload(await session.call_tool("rimdiag_read_evidence", {"run_id": summary["run_id"], "group_id": group})))
+                for priority in triage["investigation_priorities"][:args.evidence]:
+                    group = priority["group_id"]
+                    snapshot["selected_evidence"].append(payload(await session.call_tool("rimdiag_read_evidence", {"run_id": summary["run_id"], "group_id": group, "occurrence": priority["occurrence"]})))
                 report["snapshots"].append(snapshot)
                 # Full evidence stays in the private output, not the console/context.
                 print(json.dumps({"log_index": index, "summary": summary,
+                    "investigation_priorities": triage["investigation_priorities"],
+                    "structural_data_leads": triage["structural_data_leads"],
+                    "structural_data_leads": triage["structural_data_leads"],
                     "categories": triage["category_counts"],
                     "top_symptoms": [{k: f[k] for k in ("family_id", "label", "events", "groups")} for f in triage["symptom_families"]]}, ensure_ascii=False))
             if len(report["snapshots"]) == 2:

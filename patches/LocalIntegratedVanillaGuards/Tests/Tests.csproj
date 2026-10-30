@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
+    <GameDir Condition="'$(GameDir)' == ''">D:/Steam/steamapps/common/RimWorld</GameDir>
+    <HarmonyPath Condition="'$(HarmonyPath)' == ''">D:/Steam/steamapps/workshop/content/294100/2009463077/1.7/Assemblies/0Harmony.dll</HarmonyPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Source/LocalIntegratedVanillaGuards.csproj" />
+    <Reference Include="Assembly-CSharp" HintPath="$(GameDir)/Assembly-CSharp.dll" />
+    <Reference Include="UnityStubs" HintPath="$(GameDir)/UnityStubs.dll" />
+    <Reference Include="0Harmony" HintPath="$(HarmonyPath)" />
+  </ItemGroup>
+</Project>

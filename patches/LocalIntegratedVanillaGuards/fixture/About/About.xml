@@ -1,0 +1,8 @@
+<ModMetaData>
+  <name>RimDiag owned guard verification fixture — test profiles only</name>
+  <packageId>local.integratedvanillaguards.liveprobe</packageId>
+  <supportedVersions><li>1.7</li></supportedVersions>
+  <modDependencies><li><packageId>local.integratedvanillaguards</packageId></li></modDependencies>
+  <loadAfter><li>local.integratedvanillaguards</li></loadAfter>
+  <description>Calls only synthetic owned graphics in a disposable profile. Never enable in a normal player profile.</description>
+</ModMetaData>
