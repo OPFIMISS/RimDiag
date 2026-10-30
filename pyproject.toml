@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rimdiag"
+version = "0.1.0"
+description = "Evidence-first, low-context RimWorld log diagnostics for MCP agents"
+readme = "README.en.md"
+requires-python = ">=3.10"
+dependencies = ["mcp>=2.3,<3"]
+
+[project.scripts]
+rimdiag = "rimdiag.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/OPFIMISS/RimDiag"
+Documentation = "https://github.com/OPFIMISS/RimDiag/blob/main/README.en.md"
+Issues = "https://github.com/OPFIMISS/RimDiag/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

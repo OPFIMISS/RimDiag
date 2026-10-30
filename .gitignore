@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.egg-info/
+*.db
+*.db-*
+runs/
+dist/
+build/
+.env
+*.log
+*.dll
+*.exe
+*.pdb
