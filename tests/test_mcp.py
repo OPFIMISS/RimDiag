@@ -28,7 +28,7 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("Never read third-party", init.instructions)
                     tools = (await session.list_tools()).tools
                     names = {t.name for t in tools}
-                    self.assertEqual(len(names), 9)
+                    self.assertEqual(len(names), 10)
                     self.assertFalse(any("source" in x or "decomp" in x or "grant" in x for x in names))
                     caps = value(await session.call_tool("rimdiag_capabilities", {}))
                     self.assertFalse(caps["implementation_access"])
@@ -53,6 +53,21 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(value(injection)["recognized_error_events"], 30)
                     forbidden = await session.call_tool("rimdiag_decompile_mod", {"path": "foreign/Mod.dll"})
                     self.assertTrue(forbidden.is_error)
+                    invalid_plan = await session.call_tool('rimdiag_review_repair_plan', {'run_id': report['run_id'], 'plan': {'execute': 'C#'}})
+                    self.assertTrue(invalid_plan.is_error)
+                    from test_repairs import RepairTests
+                    fixture = RepairTests()
+                    fixture.setUp()
+                    try:
+                        plan = fixture.plan
+                        plan['failure_chain'][0]['logs'] = [{'group_id': page['groups'][0]['fingerprint'],
+                            'start_line': 1, 'end_line': 1, 'quote': 'NullReferenceException: Test'}]
+                        reviewed = value(await session.call_tool('rimdiag_review_repair_plan', {'run_id': report['run_id'], 'plan': plan}))
+                        self.assertEqual(reviewed['review_status'], 'outline_complete_needs_human_review')
+                        self.assertFalse(reviewed['patch_safety_verified'])
+                        self.assertFalse(reviewed['validation_claims_independently_verified'])
+                    finally:
+                        fixture.doCleanups()
 
 
 if __name__ == "__main__":

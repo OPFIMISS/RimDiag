@@ -3,6 +3,7 @@ import sqlite3
 from mcp.server.mcpserver import MCPServer
 from .core import Diagnostics, DiagnosticError
 from .parsing import CATEGORIES, PARSER_VERSION
+from .repairs import RepairPlan, review_repair_plan
 
 
 INSTRUCTIONS = """RimDiag diagnoses logs; it does not establish causality or functional correctness.
@@ -46,6 +47,7 @@ def create_server(diagnostics: Diagnostics) -> MCPServer:
                 "implementation_access": False, "decompilation": False, "game_launch": False, "automatic_patching": False,
                 "limits": {"page": 20, "triage_page": 10, "event_chars": 16384, "log_bytes": 1073741824, "events": 100000},
                 "categories": sorted(CATEGORIES),
+                "repair_plan": {"schema": 1, "review_tool": "rimdiag_review_repair_plan", "executes_patch": False},
                 "claim": "error candidates and identity references, never automatic culprit attribution"}
 
     @server.tool()
@@ -89,5 +91,10 @@ def create_server(diagnostics: Diagnostics) -> MCPServer:
     async def rimdiag_propose_isolation(run_id: str, remove_packages: list[str]) -> dict:
         """Read-only package-removal proposal plus hard-dependent closure. Reject incomplete identity metadata; preserve Core/DLC. Does NOT execute or edit settings, prove a culprit or implement automatic bisection."""
         return await call(diagnostics.isolation, run_id, remove_packages)
+
+    @server.tool()
+    async def rimdiag_review_repair_plan(run_id: str, plan: RepairPlan) -> dict:
+        """Review an evidence-anchored repair proposal. Never reads Mod implementation, executes patch source, approves publication or verifies caller-reported tests."""
+        return await call(review_repair_plan, diagnostics, run_id, plan)
 
     return server

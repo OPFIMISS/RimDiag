@@ -79,7 +79,7 @@ CLI without MCP:
 & ./.venv/Scripts/python.exe -m rimdiag --store ./runs/diagnosis --log 'D:/Logs/Player.log' analyze
 ```
 
-## Agent workflow: nine tools
+## Agent workflow: ten tools
 
 1. `rimdiag_capabilities`: permissions, budgets and supported scope.
 2. `rimdiag_analyze(log_index=0)`: stream a host-configured log into a new snapshot; receive compact counts and run_id.
@@ -90,6 +90,7 @@ CLI without MCP:
 7. `rimdiag_inventory`: page configured packages or supply an exact `package_id` from evidence to directly check identity, supported versions and declared dependency activation. This is not actual-loaded-order verification.
 8. `rimdiag_compare(baseline_id, candidate_id)`: compare independent snapshots. Shared errors remain errors; matching environments and causality are not proven. New/disappeared samples include titles and evidence-ready group IDs. Reanalyze both inputs when parser versions differ.
 9. `rimdiag_propose_isolation(run_id, remove_packages)`: read-only removal/dependent-closure proposal. It does not execute or establish blame. Lists contain at most 20 items and mark truncation; do not use a truncated sample as a complete configuration.
+10. `rimdiag_review_repair_plan(run_id, plan)`: review a structured failure chain, local log anchors, vanilla source references, normal/invalid input checks, compile/runtime claims, backup and rollback. It returns gaps and provenance boundaries. It never executes source, validates caller claims, approves a patch or replaces human review.
 
 Use disposable RimProbe profiles for separately controlled experiments. No automatic RimProbe executor integration exists yet. Repeated polling should read stored summaries, not rescan logs.
 
@@ -115,7 +116,9 @@ Recognition is heuristic: unknown/localized formats, warnings and missing logs m
 
 ## Architecture and next steps
 
-CLI defines fixed host inputs → bounded metadata inventory and streamed log parser → private SQLite snapshots → nine typed MCP tools. There is no arbitrary path-reading tool. The installed MCP SDK contract is used directly. SDK 2.3 ignores undeclared extra top-level arguments; they cannot alter configured inputs or grant access.
+See [reviewable repair plans](docs/REPAIR_PLANS.md): trace invalid data through the versioned vanilla consumer to a blocker, then document a narrow intervention, preserved behavior, remaining defects, patch text, layered verification and rollback. Local quote anchors are checked; external source/test/user claims are never independently verified by this tool. The supplied reading-policy case is recorded as user-reported, not reproduced here.
+
+CLI defines fixed host inputs → bounded metadata inventory and streamed log parser → private SQLite snapshots → ten typed MCP tools. There is no arbitrary path-reading tool. The installed MCP SDK contract is used directly. SDK 2.3 ignores undeclared extra top-level arguments; they cannot alter configured inputs or grant access.
 
 Next: validate more log formats, integrate recorded loading phases/actual order, then use RimProbe disposable runs for dependency-aware controlled experiments. Only after evidence supports it should narrow patch suggestions and functional regression checks follow. Any future implementation reader needs separately reviewed, host-controlled per-Mod consent, never self-granted model permission.
 
