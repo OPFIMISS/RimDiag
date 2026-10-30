@@ -13,7 +13,9 @@
 
 [English](README.en.md) · [架构与权限](docs/ARCHITECTURE.md) · [验证与限制](docs/VALIDATION.md)
 
-状态：**0.1.0 源码开发预览**。目前交付日志诊断闭环，不宣称自动找到全部冲突或自动生成兼容补丁。可用于 1.6 / 1.7 的文本日志与身份元数据，不需要加载游戏 Mod 或编译游戏程序集；两版本游戏内行为尚未验证。
+状态：**0.2.0 源码开发预览**。目前交付日志诊断闭环，不宣称自动找到全部冲突或自动生成兼容补丁。可用于 1.6 / 1.7 的文本日志与身份元数据，不需要加载游戏 Mod 或编译游戏程序集；两版本游戏内行为尚未验证。
+
+本轮已通过真实 MCP 分析 615 个配置包的大型环境日志，修复完整日期前缀、异常链拆分和诊断工具注释误计数，新增症状族摘要、分类筛选与精确包查询。**候选数减少来自解析修正，不代表游戏错误被修复。** 见 [本轮验证](docs/ITERATION_02.md)。
 
 ## 最快开始：交给你的 Agent
 
@@ -56,7 +58,7 @@ py -3 -m venv .venv
       "args": [
         "-m", "rimdiag",
         "--store", "C:/Projects/RimDiag/runs/my-pack",
-        "--log", "C:/Users/YOUR_NAME/AppData/LocalLow/Ludeon Studios/RimWorld by Ludeon Studios/Player.log",
+        "--log", "C:/Users/YOUR_NAME/AppData/LocalLow/Ludeon Studios/RimWorld by Ludeon Studios/Logs/Player.log",
         "--mods-config", "C:/Users/YOUR_NAME/AppData/LocalLow/Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml",
         "--mod-root", "D:/Steam/steamapps/common/RimWorld/Mods",
         "--mod-root", "D:/Steam/steamapps/workshop/content/294100",
@@ -70,6 +72,8 @@ py -3 -m venv .venv
 
 `--log`、`--mod-root` 可重复。`--mod-root` 只授权读 About 元数据，不授权实现文件。Data 用于识别 Core / DLC 元数据，既不判断许可证，也不默认移除 DLC。缺少元数据会报告 unresolved，并拒绝不可靠的隔离建议。`--mods-config` 和所有 Mod 根目录都可省略，此时仍可聚类日志，但不能可靠匹配 Mod 身份。
 
+上例日志路径对应本轮实际 1.7 环境；1.6 或其他安装可能将 Player.log 放在上一层，请填写实际路径。capabilities 会列出最多 8 个已配置日志的索引、名称、存在状态和大小。建议分析稳定副本；红字导出报告可能混合多次启动或已被上游截短，不能当作完整的当前原生日志。
+
 证据数据库保存在 `--store`，含私有日志片段及安装路径，**请勿上传或提交**；仓库忽略 runs、数据库与日志。不自动发出网络请求，不在服务内调用任何 LLM。不修改游戏、存档、Mod、配置或排序。
 
 CLI 一次分析：
@@ -82,13 +86,22 @@ CLI 一次分析：
 
 1. `rimdiag_capabilities`：确认当前能力与限制。
 2. `rimdiag_analyze(log_index=0)`：流式导入主机指定日志，返回 run_id、错误数量、分组数和完整性状态。
-3. `rimdiag_list_errors(run_id, count=10)`：按首次出现顺序查看摘要，使用 next_offset 分页。首次出现不等于根因。
-4. `rimdiag_read_evidence(run_id, group_id, occurrence=0)`：仅对需要调查的组读取一次有界证据，检查行号、截断标志、identity_references 和 unverified_symbols。同一组不同 occurrence 可以来自不同原因。
-5. `rimdiag_inventory`：按需核实配置中的包名、显示名、元数据歧义与依赖。它不是实际加载顺序证明。
-6. 修改或进行外部实验后，对另一份日志建立独立快照，使用 `rimdiag_compare`。共同错误不会被忽略；错误消失也不等于功能通过。
-7. `rimdiag_propose_isolation`：只生成移除指定包及其硬依赖者的建议，不执行。默认输出最多 20 项并标记截断；不适合直接当作完整配置。实际运行交给一次性 RimProbe profile，当前没有自动衔接执行器。
+3. `rimdiag_triage(run_id, count=5)`：先看分类计数与症状族；相同缺失类型、相同 XML 字段不匹配等可聚合显示，原始精确组全部保留。症状相同不等于根因相同。
+4. `rimdiag_list_errors(run_id, count=10)`：按首次出现顺序查看精确组，使用 next_offset 分页。可传 `category_filter`、`family_id` 和 `sort="frequency"`，避免逐页翻阅。首次出现或高频不等于根因优先级。
+5. `rimdiag_read_evidence(run_id, group_id, occurrence=0)`：仅对需要调查的组读取一次有界证据，检查行号、截断标志、identity_references 和 unverified_symbols。同一组不同 occurrence 可以来自不同原因。内层异常保留在同一事件；`exception_types` 是有界类型列表。`reported_attributions` 是原日志中排错工具的猜测，明确未核实，不能升级为身份依据或责任结论。
+6. `rimdiag_inventory`：按需核实配置中的包名、显示名、元数据歧义与依赖；传 `package_id="实际日志中的完整包ID"` 可直接查身份、支持版本和依赖启用状态，无需遍历 600 项。它不是实际加载顺序证明。
+7. 修改或进行外部实验后，对另一份日志建立独立快照，使用 `rimdiag_compare`。共同错误不会被忽略；错误消失也不等于功能通过。新增/消失样本附可直接读取的 group_id 与标题；解析版本不同时必须重新分析两份输入，不比较不同规则的计数。
+8. `rimdiag_propose_isolation`：只生成移除指定包及其硬依赖者的建议，不执行。默认输出最多 20 项并标记截断；不适合直接当作完整配置。实际运行交给一次性 RimProbe profile，当前没有自动衔接执行器。
 
 每次扫描是独立快照。轮询摘要不重新读原日志；不把整份日志塞进上下文。不要重复扫描同一文件来代替读取已有结果。
+
+目前共 9 个工具。无需手动配置第三方 MCP 客户端，也可通过仓库脚本执行真实 MCP 一轮诊断（先安装项目）：
+
+```powershell
+& ./.venv/Scripts/python.exe scripts/diagnose.py --store ./runs/diagnosis --log 'D:/Logs/Player.log'
+```
+
+脚本只在终端输出摘要、分类和前三个症状族，将详细结果保存到本地私有 JSON。可传相同的 `--mods-config` / `--mod-root`，以及 `--evidence 2` 按需保存两份症状示例证据；不会将完整证据打印到终端。恰好传两份 `--log` 时，第一份作为 baseline，第二份作为 candidate，并保存比较结果。它只启动本地 MCP 服务，不启动游戏。
 
 ## 如何避免瞎猜 Mod 名称
 
@@ -99,7 +112,7 @@ CLI 一次分析：
 
 ## 原理、预算与局限
 
-本地流式读日志 → 用错误模式识别候选事件 → 按规范化标题聚类 → SQLite 存储计数和片段 → MCP 有界分页。只移除标题开头时钟、Ref 标识和长十六进制地址，不移除 Def 名字或普通数字。
+本地流式读日志 → 用错误模式识别候选事件 → 按规范化标题聚类 → SQLite 存储计数和片段 → MCP 有界分页。已知格式的日期/时钟、日志级别、原版 logger、线程与归责提示前缀分离，原文保留在证据中；再规范化 Ref 标识和长十六进制地址，不移除 Def 名字或普通数字。未知 logger/Mod 标签不会擅自删除。INFO/WARN 中命中错误关键词的行、诊断注释单独计数，内层异常和结束分隔符不再各算一次错误。
 
 每份日志最多读取初始 1 GiB / 100,000 个事件；长物理行只保留开头，事件片段最多 16,384 字符。每页最多 20 项。600 个模拟 Mod、10,000 个重复错误的离线检查中，默认摘要小于 1.2 KB；这不是 600 个真实 Mod 的诊断准确率或客户端 token 计费结果。
 

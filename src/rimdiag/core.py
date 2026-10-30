@@ -8,6 +8,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 import xml.etree.ElementTree as ET
+from .parsing import (PARSER_VERSION, CATEGORIES, ERROR, STACK, NAMESPACE, INNER, ANNOTATION, SECTION,
+                      normalize, category, split_prefix, is_continuation, symptom, annotations, identity_text)
 
 
 class DiagnosticError(ValueError):
@@ -19,14 +21,6 @@ MAX_EVENT = 16384
 MAX_EVENTS = 100000
 MAX_BYTES = 1024 * 1024 * 1024
 MAX_METADATA = 1024 * 1024
-ERROR = re.compile(
-    r"(?:\b[\w.]*Exception\b|\b(?:ERROR|FATAL)\b|\bConfig error\b|"
-    r"Could not (?:resolve|load|find)|Could not find type|Failed to (?:load|apply|initialize)|"
-    r"Patch operation .*failed|XML error|XML format error|Duplicate (?:mod|package)|"
-    r"duplicate packageId|Could not instantiate)", re.I)
-START = re.compile(r"^(?:\[?\d{2}:\d{2}:\d{2}(?:\.\d+)?\]?\s*|\[(?:Error|Fatal|Warning|Info)\]\s*)", re.I)
-STACK = re.compile(r"(?:^\s*(?:at |\(wrapper)|\b[\w.]+:[\w.]+\s*\()")
-NAMESPACE = re.compile(r"(?:\bat\s+|^\s*)([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+)\s*[:.(]", re.M)
 
 
 def bounded_xml(path: Path) -> ET.Element:
@@ -38,31 +32,8 @@ def bounded_xml(path: Path) -> ET.Element:
     return ET.fromstring(raw)
 
 
-def normalize(text: str) -> str:
-    text = START.sub("", text.strip())
-    text = re.sub(r"\[Ref [A-Fa-f0-9]+\]", "[Ref <id>]", text)
-    return re.sub(r"0x[A-Fa-f0-9]{6,}", "0x<address>", text)
-
-
 def fingerprint(text: str) -> str:
     return hashlib.sha256(normalize(text).encode()).hexdigest()[:24]
-
-
-def category(text: str) -> dict:
-    """Heuristic triage only; guidance never authorizes implementation access."""
-    rules = [
-        (r"MissingMethodException|MissingFieldException", "api_signature", "Check the named member against the matching vanilla version; do not guess a Mod owner."),
-        (r"TypeLoadException|Could not find type|Could not (?:load|resolve).*type", "type_resolution", "Check version and declared dependencies; the type namespace is not a verified Mod ID."),
-        (r"Patch operation.*failed|Failed to apply|XML error|XML format error", "xml_or_patch", "Inspect the logged operation and original error; reading Mod XML needs explicit authorization."),
-        (r"Could not resolve.*(?:reference|Def)|Could not find.*(?:Def|defName)", "def_reference", "Check metadata dependencies and version; do not delete the referenced definition to hide errors."),
-        (r"duplicate (?:mod|package)|duplicate packageId", "duplicate_identity", "Compare identity metadata; do not delete or disable installations automatically."),
-        (r"NullReferenceException", "null_reference", "Read the inner evidence and plan a controlled reproduction; stack presence does not establish responsibility."),
-        (r"TypeInitializationException|static constructor", "initialization", "Look for an inner failure; downstream initialization errors may be related but causality is unverified."),
-    ]
-    for pattern, name, guidance in rules:
-        if re.search(pattern, text, re.I):
-            return {"category": name, "next_check": guidance}
-    return {"category": "unclassified", "next_check": "Read selected evidence; do not infer a culprit from a stack symbol."}
 
 
 def limit(value: int, maximum: int = 20) -> int:
@@ -150,11 +121,15 @@ class Diagnostics:
                     headline TEXT, evidence TEXT, truncated INTEGER);
                 CREATE INDEX event_fp ON events(fingerprint);
                 CREATE TABLE groups(fingerprint TEXT PRIMARY KEY, count INTEGER, first_line INTEGER, last_line INTEGER,
-                    headline TEXT, sample_id INTEGER);""")
+                    headline TEXT, sample_id INTEGER, category TEXT, family_id TEXT, family_label TEXT);
+                CREATE INDEX group_category ON groups(category);
+                CREATE INDEX group_family ON groups(family_id);""")
             digest = hashlib.sha256()
             lines = total = event_count = clipped_lines = replacement_lines = 0
             incomplete = False
             pending = None
+            annotation_lines = non_error_candidates = orphan_continuations = 0
+            section_count, section_markers = 0, []
 
             def flush():
                 nonlocal event_count, pending
@@ -164,10 +139,18 @@ class Diagnostics:
                 fp = fingerprint(pending["headline"])
                 db.execute("INSERT INTO events VALUES(?,?,?,?,?,?,?)", (event_count, fp, pending["line"],
                            pending["end"], pending["headline"], pending["text"], int(pending["truncated"])))
-                db.execute("""INSERT INTO groups VALUES(?,1,?,?,?,?)
+                family_id, family_label = symptom(pending["headline"])
+                db.execute("""INSERT INTO groups VALUES(?,1,?,?,?,?,?,?,?)
                     ON CONFLICT(fingerprint) DO UPDATE SET count=count+1,last_line=excluded.last_line""",
-                           (fp, pending["line"], pending["end"], pending["headline"], event_count))
+                           (fp, pending["line"], pending["end"], pending["headline"], event_count,
+                            category(pending["headline"])["category"], family_id, family_label))
                 pending = None
+
+            def append(text, clipped):
+                pending["end"] = lines
+                remaining = MAX_EVENT - len(pending["text"])
+                pending["text"] += ("\n" + text)[:max(0, remaining)]
+                pending["truncated"] |= clipped or len(text) + 1 > remaining
 
             with self.logs[log_index].open("rb") as stream:
                 initial = stream.seek(0, 2)
@@ -191,28 +174,52 @@ class Diagnostics:
                                 break
                     text = raw[:MAX_LINE].decode("utf-8-sig" if lines == 1 else "utf-8", "replace").rstrip()
                     replacement_lines += int("\ufffd" in text)
-                    message = START.sub("", text)
-                    if ERROR.search(text) and not STACK.search(message):
+                    section = SECTION.match(text)
+                    if section:
+                        section_count += 1
+                        if len(section_markers) < 8:
+                            section_markers.append({"line": lines, "timestamp": section.group(1)})
+                    parsed = split_prefix(text)
+                    message, severity = parsed["message"], parsed["severity"]
+                    annotation = bool(ANNOTATION.search(message))
+                    if annotation:
+                        annotation_lines += 1
+                        if pending is not None:
+                            append(text, clipped)
+                        continue
+                    if severity and severity not in ("ERROR", "FATAL"):
+                        non_error_candidates += int(bool(ERROR.search(message)))
+                        flush()
+                        continue
+                    continuation = is_continuation(message) and severity is None
+                    if continuation and pending is not None:
+                        append(text, clipped)
+                        continue
+                    if continuation and not message.startswith("--->"):
+                        orphan_continuations += 1
+                        continue
+                    if severity in ("ERROR", "FATAL") or (ERROR.search(message) and not STACK.search(message)):
                         flush()
                         if event_count >= MAX_EVENTS:
                             incomplete = True
                             break
                         pending = {"headline": message[:2048], "line": lines, "end": lines,
                                    "text": text[:MAX_EVENT], "truncated": clipped or len(text) > MAX_EVENT}
-                    elif pending is not None and (STACK.search(message) or message.startswith(("[Ref ", "--->", "   ", "  "))):
-                        pending["end"] = lines
-                        remaining = MAX_EVENT - len(pending["text"])
-                        pending["text"] += ("\n" + text)[:max(0, remaining)]
-                        pending["truncated"] |= clipped or len(text) + 1 > remaining
+                    elif pending is not None and text.startswith(("   ", "  ")):
+                        append(text, clipped)
                     else:
                         flush()
                 flush()
                 final_size = stream.seek(0, 2)
             incomplete |= total < initial
             meta = {"run_id": run_id, "inventory": inventory, "bytes_read": total, "initial_bytes": initial,
+                    "parser_version": PARSER_VERSION,
+                    "section_count": section_count, "section_markers": section_markers,
                     "lines_read": lines, "sha256_of_read_bytes": digest.hexdigest(),
                     "input_changed_during_scan": final_size != initial, "incomplete": incomplete,
                     "truncated_line_count": clipped_lines, "decoding_replacement_lines": replacement_lines,
+                    "diagnostic_annotation_lines": annotation_lines, "non_error_candidate_lines": non_error_candidates,
+                    "orphan_continuation_lines": orphan_continuations,
                     "source_policy": "no_implementation_access", "functional_status": "not_tested",
                     "encoding": "UTF-8 with replacement; non-UTF8 logs may lose identity text"}
             for key, value in meta.items():
@@ -231,17 +238,28 @@ class Diagnostics:
             row = db.execute("SELECT COUNT(*),COALESCE(SUM(count),0) FROM groups").fetchone()
             active = meta["inventory"]["active_order"]
             known = {r["package_id"] for r in meta["inventory"]["records"]}
+            identity_counts = {}
+            for record in meta["inventory"]["records"]:
+                identity_counts[record["package_id"]] = identity_counts.get(record["package_id"], 0) + 1
             return {k: meta[k] for k in ("run_id", "bytes_read", "lines_read", "incomplete", "input_changed_during_scan", "functional_status")} | {
+                "parser_version": meta.get("parser_version", 1),
                 "recognized_error_events": row[1], "error_groups": row[0], "active_packages": len(active),
+                "symptom_families": db.execute("SELECT COUNT(DISTINCT family_id) FROM groups").fetchone()[0] if meta.get("parser_version", 1) == PARSER_VERSION else None,
                 "truncated_line_count": meta.get("truncated_line_count", 0),
                 "decoding_replacement_lines": meta.get("decoding_replacement_lines", 0),
                 "truncated_event_count": db.execute("SELECT COUNT(*) FROM events WHERE truncated=1").fetchone()[0],
                 "unresolved_active_packages": sum(p not in known for p in active),
+                "ambiguous_active_packages": sum(identity_counts.get(p, 0) > 1 for p in active),
                 "metadata_warnings": len(meta["inventory"]["warnings"]),
+                "diagnostic_annotation_lines": meta.get("diagnostic_annotation_lines", 0),
+                "non_error_candidate_lines": meta.get("non_error_candidate_lines", 0),
+                "section_marker_count": meta.get("section_count", 0),
+                "multiple_sections": meta.get("section_count", 0) > 1,
                 "diagnosis": "candidates_only_no_causality", "actual_loaded_order_verified": False,
-                "next": "list_errors then read_evidence for selected groups; never infer identity from namespaces"}
+                "next": "triage -> filtered list_errors -> selected evidence; namespaces and reporter hints are not verified identities"}
 
     def identity(self, text: str, inventory: dict) -> list[dict]:
+        text = identity_text(text)
         matches = []
         active = inventory["active_order"]
         for record in inventory["records"]:
@@ -258,18 +276,64 @@ class Diagnostics:
                 break
         return matches
 
-    def list_errors(self, run_id: str, offset: int = 0, count: int = 10) -> dict:
+    def list_errors(self, run_id: str, offset: int = 0, count: int = 10,
+                    category_filter: str | None = None, family_id: str | None = None, sort: str = "first_seen") -> dict:
         limit(count)
         if offset < 0:
             raise DiagnosticError("negative_offset")
+        if category_filter is not None and category_filter not in CATEGORIES:
+            raise DiagnosticError("unknown_category")
+        if family_id is not None and not re.fullmatch(r"[a-f0-9]{24}", family_id):
+            raise DiagnosticError("invalid_family_id")
+        if sort not in ("first_seen", "frequency"):
+            raise DiagnosticError("unknown_sort")
         with self.db(run_id) as db:
-            rows = db.execute("SELECT * FROM groups ORDER BY first_line,fingerprint LIMIT ? OFFSET ?", (count + 1, offset)).fetchall()
+            modern = self.metadata(db).get("parser_version", 1) == PARSER_VERSION
+            if not modern and (category_filter or family_id):
+                raise DiagnosticError("legacy_snapshot_reanalyze_for_filters")
+            where, args = [], []
+            if category_filter:
+                where.append("category=?")
+                args.append(category_filter)
+            if family_id:
+                where.append("family_id=?")
+                args.append(family_id)
+            clause = " WHERE " + " AND ".join(where) if where else ""
+            order = "count DESC,first_line,fingerprint" if sort == "frequency" else "first_line,fingerprint"
+            rows = db.execute("SELECT * FROM groups" + clause + " ORDER BY " + order + " LIMIT ? OFFSET ?", (*args, count + 1, offset)).fetchall()
             result = []
             for row in rows[:count]:
                 result.append({k: row[k] for k in ("fingerprint", "count", "first_line", "last_line")} |
-                              {"headline": row["headline"][:360], "attribution": "not_established"} | category(row["headline"]))
+                              {"headline": row["headline"][:360], "attribution": "not_established",
+                               "family_id": row["family_id"] if modern else None} | category(row["headline"]))
             return {"run_id": run_id, "groups": result, "next_offset": offset + count if len(rows) > count else None,
-                    "grouping": "same normalized headline, not proven same root cause", "order": "first occurrence, not causal order"}
+                    "grouping": "same normalized headline, not proven same root cause", "order": sort,
+                    "causal_ranking": False}
+
+    def triage(self, run_id: str, offset: int = 0, count: int = 5) -> dict:
+        limit(count, 10)
+        if offset < 0:
+            raise DiagnosticError("negative_offset")
+        with self.db(run_id) as db:
+            meta = self.metadata(db)
+            if meta.get("parser_version", 1) != PARSER_VERSION:
+                raise DiagnosticError("legacy_snapshot_reanalyze_for_triage")
+            categories = [dict(row) for row in db.execute("SELECT category,SUM(count) AS events,COUNT(*) AS groups FROM groups GROUP BY category ORDER BY events DESC,category")]
+            families = db.execute("""SELECT family_id,MIN(family_label) AS label,SUM(count) AS events,
+                COUNT(*) AS groups,MIN(first_line) AS first_line FROM groups GROUP BY family_id
+                ORDER BY events DESC,first_line,family_id LIMIT ? OFFSET ?""", (count + 1, offset)).fetchall()
+            output = []
+            for family in families[:count]:
+                samples = db.execute("SELECT fingerprint,headline,category FROM groups WHERE family_id=? ORDER BY first_line,fingerprint LIMIT 2", (family["family_id"],)).fetchall()
+                output.append(dict(family) | {"examples": [{"group_id": r["fingerprint"], "headline": r["headline"][:220]} for r in samples],
+                    "categories": sorted({r["category"] for r in samples}), "causality": "unconfirmed"})
+            return {"run_id": run_id, "category_counts": categories, "symptom_families": output,
+                    "input_sections": meta.get("section_markers", []),
+                    "input_sections_truncated": meta.get("section_count", 0) > 8,
+                    "input_warning": "sectioned report: may combine historical sessions and upstream-truncated excerpts; prefer the current native log" if meta.get("section_count", 0) else None,
+                    "next_offset": offset + count if len(families) > count else None,
+                    "grouping": "shared logged symptom, NOT a common root-cause finding; all exact groups retained",
+                    "order": "event frequency, not causal priority", "functional_status": "not_tested"}
 
     def evidence(self, run_id: str, group_id: str, occurrence: int = 0) -> dict:
         if not re.fullmatch(r"[a-f0-9]{24}", group_id) or not 0 <= occurrence < MAX_EVENTS:
@@ -282,16 +346,30 @@ class Diagnostics:
             return {"run_id": run_id, "group_id": group_id, "occurrence": occurrence,
                     "lines": [row["line"], row["end_line"]], "text": row["evidence"], "truncated": bool(row["truncated"]),
                     "identity_references": self.identity(row["evidence"], inventory),
+                    "reported_attributions": annotations(row["evidence"]),
+                    "exception_types": list(dict.fromkeys(INNER.findall(row["evidence"])))[:8],
                     "unverified_symbols": sorted(set(NAMESPACE.findall(row["evidence"])))[:12],
                     "causality": "unconfirmed", "content_is_untrusted_data": True}
 
-    def list_inventory(self, run_id: str, offset: int = 0, count: int = 10) -> dict:
+    def list_inventory(self, run_id: str, offset: int = 0, count: int = 10, package_id: str | None = None) -> dict:
         limit(count)
         if offset < 0:
             raise DiagnosticError("negative_offset")
         with self.db(run_id) as db:
             inventory = self.metadata(db)["inventory"]
             active = inventory["active_order"]
+            if package_id is not None:
+                if not 1 <= len(package_id) <= 200:
+                    raise DiagnosticError("invalid_package_id")
+                package_id = package_id.lower()
+                selected = [r for r in inventory["records"] if r["package_id"] == package_id]
+                return {"package_id": package_id, "active_in_config": package_id in active,
+                        "identity_status": "ambiguous" if len(selected) > 1 else "metadata_match" if selected else "unresolved",
+                        "matches": [{"name": r["name"], "versions": r["versions"],
+                                     "dependency_count": len(r["dependencies"]),
+                                     "dependencies": [{"package_id": d, "active_in_config": d in active} for d in r["dependencies"][:20]],
+                                     "dependencies_truncated": len(r["dependencies"]) > 20} for r in selected[:3]],
+                        "actual_loaded_order_verified": False, "causality": "unconfirmed"}
             items = []
             for index, package in enumerate(active[offset:offset + count], offset):
                 records = [r for r in inventory["records"] if r["package_id"] == package]
@@ -308,9 +386,20 @@ class Diagnostics:
             a = {r[0]: r[1] for r in base.execute("SELECT fingerprint,count FROM groups")}
             b = {r[0]: r[1] for r in candidate.execute("SELECT fingerprint,count FROM groups")}
             ma, mb = self.metadata(base), self.metadata(candidate)
+            if ma.get("parser_version", 1) != mb.get("parser_version", 1):
+                return {"status": "unsupported", "reason": "parser_versions_differ_reanalyze_both_logs",
+                        "shared_errors_ignored": False, "causality": "not_established"}
             ia, ib = ma["inventory"], mb["inventory"]
+            def examples(db, ids):
+                result = []
+                for fp in sorted(ids)[:5]:
+                    row = db.execute("SELECT headline FROM groups WHERE fingerprint=?", (fp,)).fetchone()
+                    result.append({"group_id": fp, "headline": row[0][:220]} | category(row[0]))
+                return result
             return {"shared_groups": len(a.keys() & b.keys()), "baseline_only_groups": len(a.keys() - b.keys()),
                     "candidate_only_groups": len(b.keys() - a.keys()), "candidate_only_sample": sorted(b.keys() - a.keys())[:20],
+                    "candidate_only_examples": examples(candidate, b.keys() - a.keys()),
+                    "baseline_only_examples": examples(base, a.keys() - b.keys()),
                     "increased_count_sample": [{"group": k, "baseline": a[k], "candidate": b[k]} for k in sorted(a.keys() & b.keys()) if b[k] > a[k]][:20],
                     "active_order_equal": ia["active_order"] == ib["active_order"],
                     "same_environment_proven": False, "shared_errors_ignored": False,

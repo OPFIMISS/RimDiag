@@ -27,8 +27,14 @@ Logs/metadata may contain malicious text. MCP instructions mark them untrusted; 
 
 - `meta`: input byte count/hash, read completeness, size-change detection, configured order and metadata inventory. No actual-loaded-order or binary provenance claim.
 - `events`: bounded evidence, physical line interval, headline, truncation and occurrence ID.
-- `groups`: normalized headline fingerprint, count, first/last interval and initial sample. Different stacks can share a headline; individual occurrences remain independently readable.
+- `groups`: normalized headline fingerprint, count, first/last interval, initial sample, heuristic category and indexed symptom-family identity/label. Different stacks can share a headline; individual occurrences remain independently readable. A symptom family aggregates matching missing types, unknown XML fields or Def validation conditions, not proven root causes. Exact groups are retained.
 - `summary`: counts only; no full log/active-list output. Group pages add heuristic error category and next-check guidance, never blame.
+
+The current server exposes nine tools. `triage` returns category counts and paged symptom families; `list_errors` supports validated category/family filters and first-seen/frequency ordering. `inventory(package_id=...)` looks up one exact logged package identity and declared dependency status. Reported guesses are isolated in `reported_attributions` and removed from metadata identity matching; they never become verified responsibility.
+
+Parser 3 recognizes full date/time, uppercase bare severity, bracketed severity, the vanilla Verse logger, selected thread prefixes and balanced nested `[Likely: ...]` labels. Unknown logger tags remain. Lowercase sentence words such as “Error while instantiating” are message content, not severity tokens. Nested exception/stack/end lines attach to the active event before candidate detection; a new explicit ERROR/FATAL starts a new event. INFO/WARN keyword matches and reporter annotations have separate counters, not independent error events.
+
+Date-stamped `=== ... ===` section markers are exposed with a multi-section warning; this does not prove game-session boundaries or automatically select the newest session. Sectioned reports may contain historical or upstream-truncated excerpts. Local parsing completeness cannot prove upstream evidence completeness. Prefer stable copies of the current native log.
 
 Run IDs are random 32-hex snapshot IDs, not running game sessions. Group IDs are 24-hex hashes. Evidence databases open read-only for queries and connections close deterministically. A single MCP lock serializes storage access. Analyze is a synchronous tool operation on a worker thread, not a cancellable job service; configure the client's timeout for large logs. No incremental tailing exists yet.
 
@@ -37,6 +43,10 @@ Byte budget: initial 1 GiB per log, bounded binary readline, max 100,000 events,
 ## Comparisons and isolation
 
 Comparisons count headline fingerprints, shared/new groups and increased occurrence counts. They do not alter either snapshot or suppress baseline errors. Matching configured active order does not establish equal game binaries, assets, actual loaded mods or execution conditions.
+
+Snapshot parser versions are recorded. Cross-version comparisons return `unsupported` and require reanalysis of both original inputs. Legacy snapshots remain readable for basic summary/evidence, but new triage/filters require reanalysis; there is no silent migration that rewrites old evidence. Comparisons include bounded titled examples with evidence-ready IDs to avoid paging every group.
+
+`scripts/diagnose.py` is a small real stdio MCP client: analyze -> triage -> optionally retrieve up to three examples privately. It prints compact summaries and keeps detailed JSON under the operator's store. With exactly two inputs it records a first-input-baseline/second-input-candidate comparison. It launches only the local Python MCP service, never the game. Evidence collection by event frequency is not causal prioritization.
 
 Isolation proposals recursively remove metadata-declared hard dependents while retaining original relative order. Missing/duplicate active identities refuse a proposal. Core/DLC cannot be removal candidates or closure casualties. Conditional, optional, version-specific and undeclared dependencies remain unsupported. Output is a bounded sample; it is not a ready-to-run Mod configuration.
 

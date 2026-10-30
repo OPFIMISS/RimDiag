@@ -205,6 +205,90 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(report['metadata_warnings'], 1)
         self.assertEqual(self.engine.isolation(report['run_id'], ['sample.a'])['status'], 'unsupported')
 
+    def test_nested_exception_chain_is_one_event(self):
+        report = self.scan('2026-10-30 12:00:00.000 ERROR [Verse] Error while instantiating a mod of type Example.Mod: System.Reflection.TargetInvocationException: outer\n'
+                           ' ---> HarmonyLib.HarmonyException: patch failed\n'
+                           ' ---> System.ArgumentException: inner cause\n'
+                           ' at Example.Method()\n'
+                           '   --- End of inner exception stack trace ---\n'
+                           '[Error Helper] Likely cause: sample.a.\n')
+        self.assertEqual(report['recognized_error_events'], 1)
+        self.assertEqual(report['diagnostic_annotation_lines'], 1)
+        evidence = self.evidence(report)
+        self.assertIn('System.ArgumentException', evidence['exception_types'])
+        self.assertIn('End of inner', evidence['text'])
+        self.assertEqual(evidence['identity_references'], [])
+        self.assertFalse(evidence['reported_attributions'][0]['verified'])
+
+    def test_info_diagnostic_text_is_not_an_error(self):
+        report = self.scan('2026-10-30 12:00:00 INFO [Verse] [Error Helper] Active: error checks enabled\n')
+        self.assertEqual(report['recognized_error_events'], 0)
+        self.assertEqual(report['non_error_candidate_lines'], 1)
+
+    def test_explicit_error_severity_survives_unknown_message(self):
+        report = self.scan('2026-10-30 12:00:00 ERROR [Verse] Unknown failure\n')
+        self.assertEqual(report['recognized_error_events'], 1)
+
+    def test_new_explicit_error_does_not_append_to_old_chain(self):
+        report = self.scan('ERROR Exception: one\n ---> System.Exception: inner\n12:00:01 ERROR Exception: two\n')
+        self.assertEqual(report['recognized_error_events'], 2)
+
+    def test_category_filter_family_and_frequency(self):
+        report = self.scan('ERROR NullReferenceException: A\nERROR XML error: B\nERROR XML error: B\n')
+        page = self.engine.list_errors(report['run_id'], category_filter='xml_or_patch', sort='frequency')
+        self.assertEqual(len(page['groups']), 1)
+        self.assertEqual(page['groups'][0]['count'], 2)
+        family_id = page['groups'][0]['family_id']
+        self.assertEqual(len(self.engine.list_errors(report['run_id'], family_id=family_id)['groups']), 1)
+        with self.assertRaises(DiagnosticError):
+            self.engine.list_errors(report['run_id'], category_filter='invented')
+        with self.assertRaises(DiagnosticError):
+            self.engine.list_errors(report['run_id'], sort='count; DROP TABLE groups')
+
+    def test_symptom_family_preserves_all_exact_groups(self):
+        report = self.scan('Could not find type named Example.Type from node <A/>\nCould not find type named Example.Type from node <B/>\n')
+        self.assertEqual(report['error_groups'], 2)
+        triage = self.engine.triage(report['run_id'])
+        family = triage['symptom_families'][0]
+        self.assertEqual((family['events'], family['groups']), (2, 2))
+        self.assertEqual(len(family['examples']), 2)
+        self.assertEqual(family['causality'], 'unconfirmed')
+        self.assertEqual(sum(c['events'] for c in triage['category_counts']), report['recognized_error_events'])
+
+    def test_compare_different_parser_versions_requires_reanalysis(self):
+        a = self.scan('ERROR A\n')
+        b = self.scan('ERROR A\n')
+        import sqlite3
+        with sqlite3.connect(self.engine.store / (a['run_id'] + '.db')) as db:
+            db.execute("UPDATE meta SET value='1' WHERE key='parser_version'")
+        result = self.engine.compare(a['run_id'], b['run_id'])
+        self.assertEqual(result['status'], 'unsupported')
+        self.assertEqual(result['reason'], 'parser_versions_differ_reanalyze_both_logs')
+
+    def test_exact_inventory_lookup_returns_dependency_status(self):
+        report = self.scan('ERROR unknown\n')
+        result = self.engine.list_inventory(report['run_id'], package_id='SAMPLE.B')
+        self.assertEqual(result['matches'][0]['name'], 'Beta')
+        self.assertEqual(result['matches'][0]['dependencies'][0], {'package_id': 'sample.a', 'active_in_config': True})
+        self.assertEqual(self.engine.list_inventory(report['run_id'], package_id='Guessed.Namespace')['identity_status'], 'unresolved')
+
+    def test_report_session_markers_warn_without_suppressing(self):
+        report = self.scan('=== 2026-10-30 18:00:00 game start ===\nERROR older\n=== 2026-10-30 19:00:00 game start ===\nERROR current\n')
+        self.assertEqual(report['section_marker_count'], 2)
+        self.assertTrue(report['multiple_sections'])
+        self.assertEqual(report['recognized_error_events'], 2)
+        triage = self.engine.triage(report['run_id'])
+        self.assertEqual(triage['input_sections'][0]['line'], 1)
+        self.assertIn('historical', triage['input_warning'])
+
+    def test_comparison_examples_point_directly_to_evidence(self):
+        a = self.scan('ERROR common\nERROR older\n')
+        b = self.scan('ERROR common\nERROR newly observed\n')
+        result = self.engine.compare(a['run_id'], b['run_id'])
+        example = result['candidate_only_examples'][0]
+        self.assertIn('newly observed', example['headline'])
+        self.assertIn('newly observed', self.engine.evidence(b['run_id'], example['group_id'])['text'])
+
 
 if __name__ == "__main__":
     unittest.main()

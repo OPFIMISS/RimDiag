@@ -1,5 +1,7 @@
 # Validation / 验证记录
 
+This page preserves **0.1.0 historical** evidence. For the current 0.2.0 / parser 3 checks and real 615-package log replay, see [iteration two](ITERATION_02.md). Historical counts must not be compared directly across parser versions.
+
 Date: 2026-10-30. Local Windows / Python 3.10, installed MCP SDK 2.3.0 and Pydantic 2.14.1. This record distinguishes synthetic checks, historical-log replay and live-game verification.
 
 ## Offline checks
